@@ -7,9 +7,15 @@
 #include <NTPClient.h>
 #include <EthernetUdp.h>
 #include <DS3231.h>
+#include <DallasTemperature.h>
 
 #define ETH_CS    10
 #define SD_CS  4
+#define ONE_WIRE_BUS 12
+
+OneWire oneWire(ONE_WIRE_BUS);
+
+DallasTemperature sensors(&oneWire);
 
 // Ethernet UDP
 EthernetUDP ntpUDP;
@@ -71,6 +77,7 @@ void setup(void)
 
   setupPins();
   rtc.begin();
+  sensors.begin();
 
 
   // Init variables and expose them to REST API
@@ -119,8 +126,21 @@ void loop() {
   // listen for incoming clients
   EthernetClient client = server.available();
   rest.handle(client);
-  wdt_reset();
 
+  // Update sensors
+  sensors.requestTemperatures();
+  internal_temperature = sensors.getTempCByIndex(0);
+  water_temperature = sensors.getTempCByIndex(1);
+  basking_temperature = sensors.getTempCByIndex(2);  
+  
+  Serial.println("Internal Temp: ");
+  Serial.println(internal_temperature);
+  Serial.println("Water Temp: ");
+  Serial.println(water_temperature);
+  Serial.println("Basking Temp: ");
+  Serial.println(basking_temperature);
+  
+  wdt_reset();
 }
 
 void setupPins() {
@@ -128,16 +148,21 @@ void setupPins() {
     Serial.print("Setting up pin: ");
     Serial.println(pin);
     pinMode(outletPins[pin], OUTPUT);
-    delay(100);
-    digitalWrite(pin, LOW);
-    delay(100);
-    digitalWrite(pin, HIGH);
-    delay(100);
-    digitalWrite(pin, LOW);
+    delay(500);
   }
   for (int pin = 0; pin < inputPinCount; pin++) {
     pinMode(inputPins[pin], INPUT);
+    delay(500);
   }
+  digitalWrite(outlet1, HIGH);
+  digitalWrite(outlet2, HIGH);
+  digitalWrite(outlet3, HIGH);
+  digitalWrite(outlet4, HIGH);
+  digitalWrite(outlet5, HIGH);
+  digitalWrite(outlet6, HIGH);
+  digitalWrite(outlet7, HIGH);
+  digitalWrite(outlet8, HIGH);
+
 }
 
 double setWaterTemperature() {
@@ -150,21 +175,21 @@ double setBaskingTemperature() {
 
 // Funtion to call in the morning
 int morning(String command) {
-  digitalWrite(outlet1, HIGH);
-  delay(100);
-  digitalWrite(outlet2, HIGH);
-  delay(100);
-  digitalWrite(outlet3, LOW);
+  digitalWrite(outlet1, LOW);
+  delay(500);
+  digitalWrite(outlet2, LOW);
+  delay(500);
+  digitalWrite(outlet3, HIGH);
   return 1;
 }
 
 // Function to call at night
 int night(String command) {
-  digitalWrite(outlet3, HIGH);
-  delay(100);
-  digitalWrite(outlet1, LOW);
-  delay(100);
-  digitalWrite(outlet2, LOW);
+  digitalWrite(outlet3, LOW);
+  delay(500);
+  digitalWrite(outlet1, HIGH);
+  delay(500);
+  digitalWrite(outlet2, HIGH);
   return 1;
 }
 
