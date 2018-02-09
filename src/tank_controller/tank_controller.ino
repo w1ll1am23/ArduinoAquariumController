@@ -27,10 +27,10 @@ NTPClient timeClient(ntpUDP, "192.168.5.1", 3600, 60000);
 byte mac[] = { 0x90, 0xA2, 0xDA, 0x0E, 0xFE, 0x12 };
 
 // IP address in case DHCP fails
-IPAddress ip(192,168,2,2);
+IPAddress ip(192,168,5,221);
 
 // Gateway adress
-IPAddress gateway(192,168,2,1);
+IPAddress gateway(192,168,5,1);
 
 // Ethernet server
 EthernetServer server(80);
@@ -45,8 +45,13 @@ DS3231  rtc(SDA, SCL);
 float water_temperature;
 float basking_temperature;
 float internal_temperature;
-float uvb;
+String start_up_time;
 String current_time;
+String water_low;
+int current_hour;
+int current_minute;
+
+int loopCount = 0;
 
 int outlet1 = 2;
 int outlet2 = 3;
@@ -60,8 +65,13 @@ int outlet8 = 9;
 int outletPins[] = {outlet1, outlet2, outlet3, outlet4, outlet5, outlet6, outlet7, outlet8};
 int outputPinCount = 8;
 
-int inputPins[0];
-int inputPinCount = 0;
+int waterLevel = 13;
+
+int inputPins[] = {waterLevel};
+int inputPinCount = 1;
+
+bool nightTime = false;
+bool dayTime = false;
 
 void setup(void)
 {
@@ -75,47 +85,23 @@ void setup(void)
   delay(100);
   digitalWrite(SD_CS,HIGH); // De-Select the internal SD Card
 
-  setupPins();
-  rtc.begin();
-  sensors.begin();
-
-
-  // Init variables and expose them to REST API
-  water_temperature = 0.0;
-  basking_temperature = 0.0;
-  internal_temperature = 0.0;
-  uvb = 0.0;
-  current_time = rtc.getTimeStr();
-  
-  rest.variable("water_temperature",&water_temperature);
-  rest.variable("basking_temperature",&basking_temperature);
-  rest.variable("internal_temperature", &internal_temperature);
-  rest.variable("uvb",&uvb);
-  rest.variable("current_time", &current_time);
-
-  // Functions to be exposed
-  rest.function("morning",morning);
-  rest.function("night",night);
-
-  // Give name & ID to the device (ID should be 6 characters long)
-  rest.set_id("000001");
-  rest.set_name("tank");
-
   // Start the Ethernet connection and the server
   if (Ethernet.begin(mac) == 0) {
     Serial.println("Failed to configure Ethernet using DHCP");
     Ethernet.begin(mac, ip);
+  } else {
+    timeClient.update();
+    delay(500);
+    timeClient.forceUpdate();
+    Serial.print("Formatted date/time: ");
+    Serial.println(timeClient.getFormattedTime());
+    
+    setTime();
   }
+  
   server.begin();
   Serial.print("server is at ");
   Serial.println(Ethernet.localIP());
-
-  timeClient.update();
-  delay(500);
-  timeClient.forceUpdate();
-  Serial.println(timeClient.getFormattedTime());
-
-  setTime();
 
   // Start watchdog
   wdt_enable(WDTO_4S);
@@ -132,21 +118,50 @@ void loop() {
   internal_temperature = sensors.getTempCByIndex(0);
   water_temperature = sensors.getTempCByIndex(1);
   basking_temperature = sensors.getTempCByIndex(2);  
-  
-  Serial.println("Internal Temp: ");
-  Serial.println(internal_temperature);
-  Serial.println("Water Temp: ");
-  Serial.println(water_temperature);
-  Serial.println("Basking Temp: ");
-  Serial.println(basking_temperature);
+
+  if (loopCount == 30) {
+    Serial.print("Internal Temp: ");
+    Serial.println(internal_temperature);
+    Serial.print("Water Temp: ");
+    Serial.println(water_temperature);
+    Serial.print("Basking Temp: ");
+    Serial.println(basking_temperature);
+    Serial.print("Water low?: ");
+    Serial.println(water_low);
+    
+
+    if (digitalRead(waterLevel) == 1) {
+      water_low = "true";
+    } else {
+      water_low = "false";
+    }
+
+    current_time = rtc.getTimeStr();
+    Serial.print("Current time: ");
+    Serial.println(current_time);
+    current_hour = rtc.getTime().hour;
+    current_minute = rtc.getTime().min;
+    if ((current_hour >= 22 || current_hour < 9)) {
+      if (!nightTime) {
+        night("");
+      }
+    } else {
+      if (!dayTime) {
+        morning("");
+      }
+    }
+
+    
+    loopCount = 0;
+  } else {
+    loopCount = loopCount + 1;
+  }
   
   wdt_reset();
 }
 
 void setupPins() {
   for (int pin = 0; pin < outputPinCount; pin++) {
-    Serial.print("Setting up pin: ");
-    Serial.println(pin);
     pinMode(outletPins[pin], OUTPUT);
     delay(500);
   }
@@ -157,24 +172,23 @@ void setupPins() {
   digitalWrite(outlet1, HIGH);
   digitalWrite(outlet2, HIGH);
   digitalWrite(outlet3, HIGH);
-  digitalWrite(outlet4, HIGH);
-  digitalWrite(outlet5, HIGH);
-  digitalWrite(outlet6, HIGH);
-  digitalWrite(outlet7, HIGH);
+//  THE BELOW ARE ALWAYS ON
+//  Heat bulb
+//  digitalWrite(outlet4, HIGH);
+//  Water heaters
+//  digitalWrite(outlet5, HIGH);
+//  digitalWrite(outlet6, HIGH);
+//  Filter
+//  digitalWrite(outlet7, HIGH);
   digitalWrite(outlet8, HIGH);
 
 }
 
-double setWaterTemperature() {
-  return 0.0;
-}
-
-double setBaskingTemperature() {
-  return 0.0;
-}
-
 // Funtion to call in the morning
 int morning(String command) {
+  dayTime = true;
+  nightTime = false;
+  Serial.println("Running day command.");
   digitalWrite(outlet1, LOW);
   delay(500);
   digitalWrite(outlet2, LOW);
@@ -185,6 +199,9 @@ int morning(String command) {
 
 // Function to call at night
 int night(String command) {
+  nightTime = true;
+  dayTime = false;
+  Serial.println("Running night command.");
   digitalWrite(outlet3, LOW);
   delay(500);
   digitalWrite(outlet1, HIGH);
@@ -198,18 +215,27 @@ int setTime() {
 
   Serial.println(timeClient.getFormattedDate());
   int day = timeClient.getDay();
-  int hour = timeClient.getHours();
+  // Not sure why this is off by 1 hour...
+  int hour = timeClient.getHours() - 1;
   int minute = timeClient.getMinutes();
   int second = timeClient.getSeconds();
   long dayOfMonth = timeClient.getDate();
   long month = timeClient.getMonth();
   long the_year = timeClient.getYear();
+  Serial.println("Time server info.");
+  Serial.print("Day of week: ");
   Serial.println(day);
+  Serial.print("Hour of day: ");
   Serial.println(hour);
+  Serial.print("Minute of hour: ");
   Serial.println(minute);
+  Serial.print("Second of minute: ");
   Serial.println(second);
+  Serial.print("Day of month: ");
   Serial.println(dayOfMonth);
+  Serial.print("Month of year: ");
   Serial.println(month);
+  Serial.print("Year: ");
   Serial.println(the_year);
 
   if (day == 7) {
@@ -218,13 +244,9 @@ int setTime() {
     rtc.setDOW(day);
   }
   rtc.setTime(hour, minute, second);
-  rtc.setDate(month + 1, dayOfMonth, the_year);   // Set the date to January 1st, 2014
-
-  // Send Day-of-Week
-  Serial.print(rtc.getDOWStr());
-  Serial.print(" ");
+  rtc.setDate(month + 1, dayOfMonth, the_year);
   
   // Send date
-  Serial.print(rtc.getDateStr());
+  Serial.println(rtc.getDateStr());
 
 }
