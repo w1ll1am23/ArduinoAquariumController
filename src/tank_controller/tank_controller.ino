@@ -41,6 +41,7 @@ aREST rest = aREST();
 // Init the DS3231 using the hardware interface
 DS3231  rtc(SDA, SCL);
 
+// Used for detecting time and runnning time based commands.
 int currentHour;
 int currentMinute;
 
@@ -56,6 +57,7 @@ int leakValue;
 
 int loopCount = 0;
 
+// Constants for input/output pins
 const int outlet1 = 2;
 const int outlet2 = 3;
 const int outlet3 = 11;
@@ -64,14 +66,10 @@ const int outlet5 = 6;
 const int outlet6 = 7;
 const int outlet7 = 8;
 const int outlet8 = 9;
-
 const int leakPin = A0;
-
 const int outletPins[] = {outlet1, outlet2, outlet3, outlet4, outlet5, outlet6, outlet7, outlet8};
 const int outputPinCount = 8;
-
 const int waterLevel = 13;
-
 const int inputPins[] = {waterLevel};
 const int inputPinCount = 1;
 
@@ -83,6 +81,8 @@ void setup(void)
   // Start Serial
   Serial.begin(115200);
   Serial.println("Starting up...");
+
+  // Make the Ethernet module actually work.
   pinMode(ETH_CS, OUTPUT);
   pinMode(SD_CS, OUTPUT);
   delay(100);
@@ -90,12 +90,27 @@ void setup(void)
   delay(100);
   digitalWrite(SD_CS, HIGH); // De-Select the internal SD Card
 
+  // Check for a leak
+  leakValue = analogRead(leakPin);
+  if (leakValue > 100) {
+    leak = "true";
+  } else {
+    leak = "false";
+  }
+
+  // Set the pins to input/output mode
   setupPins();
+
+  // Enable the rtc and the ds18b20 temperature sensors
   rtc.begin();
   sensors.begin();
+
+  // Set the current hour and minute for use with time based functions
   currentHour = rtc.getTime().hour;
   currentMinute = rtc.getTime().min;
-  if ((currentHour >= 22 || currentHour < 9)) {
+
+  // If it is after 10pm and before 9am EST
+  if ((currentHour >= 3 && currentHour < 14)) {
     if (!nightTime) {
       night("");
     }
@@ -117,13 +132,6 @@ void setup(void)
   } else {
     waterLow = "false";
   }
-  leakValue = analogRead(leakPin);
-  if (leakValue > 100) {
-    leak = "true";
-  } else {
-    leak = "false";
-  }
-
   rest.variable("water_temperature", &waterTemperature);
   rest.variable("basking_temperature", &baskingTemperature);
   rest.variable("internal_temperature", &internalTemperature);
@@ -132,7 +140,7 @@ void setup(void)
   rest.variable("water_low", &waterLow);
   rest.variable("leaking", &leak);
 
-  // Functions to be exposed
+  // Functions to be exposed probably won't need these.
   rest.function("morning", morning);
   rest.function("night", night);
 
@@ -144,14 +152,17 @@ void setup(void)
   if (Ethernet.begin(mac) == 0) {
     Serial.println("Failed to configure Ethernet using DHCP");
     Ethernet.begin(mac, ip);
+    // If there is a network connection call out to the NTP server and set the RTC
   } else {
     timeClient.update();
     delay(500);
     timeClient.forceUpdate();
     Serial.println(timeClient.getFormattedTime());
 
+    // Set the RTC
     setTime();
   }
+
   server.begin();
   Serial.print("server is at ");
   Serial.println(Ethernet.localIP());
@@ -162,13 +173,24 @@ void setup(void)
 
 void loop() {
 
-  // Update sensors
-  sensors.requestTemperatures();
-  internalTemperature = sensors.getTempCByIndex(0);
-  waterTemperature = sensors.getTempCByIndex(1);
-  baskingTemperature = sensors.getTempCByIndex(2);
+  // Check for a leak every loop
+  leakValue = analogRead(leakPin);
+  if (leakValue > 100) {
+    leak = "true";
+    Serial.println("Leak detected. Turning filter off.");
+    digitalWrite(outlet7, HIGH);
+  } else {
+    leak = "false";
+  }
 
   if (loopCount == 30) {
+    // Update sensors
+    sensors.requestTemperatures();
+    internalTemperature = sensors.getTempCByIndex(0);
+    waterTemperature = sensors.getTempCByIndex(1);
+    baskingTemperature = sensors.getTempCByIndex(2);
+
+    // Output sensors to serial
     Serial.print("Internal Temp: ");
     Serial.println(internalTemperature);
     Serial.print("Water Temp: ");
@@ -178,19 +200,10 @@ void loop() {
     Serial.print("Water low?: ");
     Serial.println(waterLow);
 
-
     if (digitalRead(waterLevel) == 1) {
       waterLow = "true";
     } else {
       waterLow = "false";
-    }
-
-    leakValue = analogRead(leakPin);
-    Serial.println(leakValue);
-    if (leakValue > 100) {
-      leak = "true";
-    } else {
-      leak = "false";
     }
 
     currentTime = rtc.getTimeStr();
@@ -198,7 +211,9 @@ void loop() {
     Serial.println(currentTime);
     currentHour = rtc.getTime().hour;
     currentMinute = rtc.getTime().min;
-    if ((currentHour >= 22 || currentHour < 9)) {
+
+    // If it is after 10pm and before 9am EST
+    if ((currentHour >= 3 && currentHour < 14)) {
       if (!nightTime) {
         night("");
       }
@@ -208,9 +223,10 @@ void loop() {
       }
     }
 
-
+    // reset loop counter
     loopCount = 0;
   } else {
+    delay(1000);
     loopCount = loopCount + 1;
   }
 
@@ -222,14 +238,19 @@ void loop() {
 }
 
 void setupPins() {
+
+  // Setup output pins
   for (int pin = 0; pin < outputPinCount; pin++) {
     pinMode(outletPins[pin], OUTPUT);
     delay(500);
   }
+  // Setup input pins
   for (int pin = 0; pin < inputPinCount; pin++) {
     pinMode(inputPins[pin], INPUT);
     delay(500);
   }
+
+  // Turn off all of the optional pins
   digitalWrite(outlet1, HIGH);
   delay(200);
   digitalWrite(outlet2, HIGH);
@@ -243,7 +264,11 @@ void setupPins() {
   //  digitalWrite(outlet5, HIGH);
   //  digitalWrite(outlet6, HIGH);
   //  Filter
-  //  digitalWrite(outlet7, HIGH);
+  // Don't turn on the filter if there is a leak at startup
+  if (leak == "true") {
+    Serial.println("Leak detected. Leaving filter off.");
+    digitalWrite(outlet7, HIGH);
+  }
   digitalWrite(outlet8, HIGH);
 
 }
