@@ -1,5 +1,5 @@
 #include <TimeLib.h>
-
+#include "EmonLib.h"
 #include <SPI.h>
 #include <Ethernet.h>
 #include <aREST.h>
@@ -14,8 +14,8 @@
 #define ONE_WIRE_BUS 12
 
 OneWire oneWire(ONE_WIRE_BUS);
-
 DallasTemperature sensors(&oneWire);
+EnergyMonitor emon1;
 
 // Ethernet UDP
 EthernetUDP ntpUDP;
@@ -54,6 +54,7 @@ String currentTime;
 String waterLow;
 String leak;
 int leakValue;
+float amps;
 
 int loopCount = 0;
 
@@ -105,6 +106,10 @@ void setup(void)
   rtc.begin();
   sensors.begin();
 
+  // Start up current sensor
+  emon1.current(1, 57.63);
+  amps = emon1.calcIrms(1480);
+
   // Set the current hour and minute for use with time based functions
   currentHour = rtc.getTime().hour;
   currentMinute = rtc.getTime().min;
@@ -139,6 +144,7 @@ void setup(void)
   rest.variable("startup_time", &startupTime);
   rest.variable("water_low", &waterLow);
   rest.variable("leaking", &leak);
+  rest.variable("amps", &amps);
 
   // Functions to be exposed probably won't need these.
   rest.function("morning", morning);
@@ -190,6 +196,8 @@ void loop() {
     waterTemperature = sensors.getTempCByIndex(1);
     baskingTemperature = sensors.getTempCByIndex(2);
 
+    amps = emon1.calcIrms(1480);
+
     // Output sensors to serial
     Serial.print("Internal Temp: ");
     Serial.println(internalTemperature);
@@ -199,6 +207,8 @@ void loop() {
     Serial.println(baskingTemperature);
     Serial.print("Water low?: ");
     Serial.println(waterLow);
+    Serial.print("Amps in use: ");
+    Serial.println(amps);
 
     if (digitalRead(waterLevel) == 1) {
       waterLow = "true";

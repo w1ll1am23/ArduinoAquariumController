@@ -12,3 +12,4 @@ The requirements for this project were as follows.
 5. 3 temperature sensors (Water, basking area, internal controller temperature)
 6. water leak sensor (If my canister filter is leaking turn it off)
 7. water level sensor (One day I would like to auto fill the tank)
+8. Current sensor (Amps in use.)
