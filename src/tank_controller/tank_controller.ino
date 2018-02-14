@@ -55,6 +55,8 @@ String waterLow;
 String leak;
 int leakValue;
 float amps;
+float kWh;
+float yesterdays_total_kWh;
 
 int loopCount = 0;
 
@@ -74,8 +76,14 @@ const int waterLevel = 13;
 const int inputPins[] = {waterLevel};
 const int inputPinCount = 1;
 
+const float voltage = 117;
+
 bool nightTime = false;
 bool dayTime = false;
+
+long start_time_unix;
+long new_time;
+double last_power;;
 
 void setup(void)
 {
@@ -109,6 +117,7 @@ void setup(void)
   // Start up current sensor
   emon1.current(1, 57.63);
   amps = emon1.calcIrms(1480);
+  start_time_unix = rtc.getUnixTime(rtc.getTime());
 
   // Set the current hour and minute for use with time based functions
   currentHour = rtc.getTime().hour;
@@ -125,8 +134,9 @@ void setup(void)
     }
   }
 
-
   // Init variables and expose them to REST API
+  kWh = 0.0;
+  yesterdays_total_kWh = 0.0;
   internalTemperature = sensors.getTempCByIndex(0);
   waterTemperature = sensors.getTempCByIndex(1);
   baskingTemperature = sensors.getTempCByIndex(2);
@@ -145,6 +155,7 @@ void setup(void)
   rest.variable("water_low", &waterLow);
   rest.variable("leaking", &leak);
   rest.variable("amps", &amps);
+  rest.variable("kWh", &kWh);
 
   // Functions to be exposed probably won't need these.
   rest.function("morning", morning);
@@ -191,12 +202,23 @@ void loop() {
 
   if (loopCount == 30) {
     // Update sensors
+    last_power = amps * voltage;
     sensors.requestTemperatures();
     internalTemperature = sensors.getTempCByIndex(0);
     waterTemperature = sensors.getTempCByIndex(1);
     baskingTemperature = sensors.getTempCByIndex(2);
 
     amps = emon1.calcIrms(1480);
+
+    // Calculate the Kilowatt hours used in the last 24 hours
+    // Reset the kWh value to 0 at Midnight ET
+    if (currentHour == 5 && currentMinute == 0) {
+      yesterdays_total_kWh = kWh;
+      kWh = 0;
+    }
+    new_time = rtc.getUnixTime(rtc.getTime());
+    kWh = kWh + ((((amps * voltage) + last_power) / 2) * (new_time - start_time_unix) / 3600000);
+    start_time_unix = new_time;
 
     // Output sensors to serial
     Serial.print("Internal Temp: ");
@@ -209,6 +231,8 @@ void loop() {
     Serial.println(waterLow);
     Serial.print("Amps in use: ");
     Serial.println(amps);
+    Serial.print("kWh used: ");
+    Serial.println(kWh);
 
     if (digitalRead(waterLevel) == 1) {
       waterLow = "true";
