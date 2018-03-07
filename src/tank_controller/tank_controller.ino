@@ -1,3 +1,4 @@
+#include <Timezone.h>
 #include <TimeLib.h>
 #include "EmonLib.h"
 #include <SPI.h>
@@ -20,9 +21,6 @@ EnergyMonitor emon1;
 // Ethernet UDP
 EthernetUDP ntpUDP;
 
-// NTP client
-NTPClient timeClient(ntpUDP, "192.168.5.1", 0, 60000);
-
 // Enter a MAC address for your controller below.
 byte mac[] = { 0x90, 0xA2, 0xDA, 0x0E, 0xFE, 0x12 };
 
@@ -35,11 +33,17 @@ IPAddress gateway(192, 168, 5, 1);
 // Ethernet server
 EthernetServer server(80);
 
+NTPClient timeClient(ntpUDP, "192.168.5.1", 0, 60000);
+
 // Create aREST instance
 aREST rest = aREST();
 
 // Init the DS3231 using the hardware interface
 DS3231  rtc(SDA, SCL);
+
+TimeChangeRule usEDT = {"EDT", Second, Sun, Mar, 2, -240};  //UTC - 4 hours
+TimeChangeRule usEST = {"EST", First, Sun, Nov, 2, -300};   //UTC - 5 hours
+Timezone usEastern(usEDT, usEST);
 
 // Used for detecting time and runnning time based commands.
 int currentHour;
@@ -61,29 +65,30 @@ float yesterdays_total_kWh;
 int loopCount = 0;
 
 // Constants for input/output pins
-const int outlet1 = 2;
-const int outlet2 = 3;
-const int outlet3 = 11;
-const int outlet4 = 5;
-const int outlet5 = 6;
-const int outlet6 = 7;
-const int outlet7 = 8;
-const int outlet8 = 9;
-const int leakPin = A0;
-const int outletPins[] = {outlet1, outlet2, outlet3, outlet4, outlet5, outlet6, outlet7, outlet8};
-const int outputPinCount = 8;
-const int waterLevel = 13;
-const int inputPins[] = {waterLevel};
-const int inputPinCount = 1;
+const int OUTLET1 = 2;
+const int OUTLET2 = 3;
+const int OUTLET3 = 11;
+const int OUTLET4 = 5;
+const int OUTLET5 = 6;
+const int OUTLET6 = 7;
+const int OUTLET7 = 8;
+const int OUTLET8 = 9;
+const int LEAK_PIN = A0;
+const int OUTLET_PINS[] = {OUTLET1, OUTLET2, OUTLET3, OUTLET4, OUTLET5, OUTLET5, OUTLET7, OUTLET8};
+const int OUTPUT_PIN_COUNT = 8;
+const int WATER_LEVEL = 13;
+const int INPUT_PINS[] = {WATER_LEVEL};
+const int INPUT_PIN_COUNT = 1;
 
-const float voltage = 117;
+const float VOLTAGE = 117;
 
 bool nightTime = false;
 bool dayTime = false;
+bool dst = false;
 
 long start_time_unix;
 long new_time;
-double last_power;;
+double last_power;
 
 void setup(void)
 {
@@ -100,7 +105,7 @@ void setup(void)
   digitalWrite(SD_CS, HIGH); // De-Select the internal SD Card
 
   // Check for a leak
-  leakValue = analogRead(leakPin);
+  leakValue = analogRead(LEAK_PIN);
   if (leakValue > 100) {
     leak = "true";
   } else {
@@ -124,7 +129,7 @@ void setup(void)
   currentMinute = rtc.getTime().min;
 
   // If it is after 10pm and before 9am EST
-  if ((currentHour >= 3 && currentHour < 14)) {
+  if ((currentHour >= 22 || currentHour < 9)) {
     if (!nightTime) {
       night("");
     }
@@ -142,7 +147,7 @@ void setup(void)
   baskingTemperature = sensors.getTempCByIndex(2);
   currentTime = rtc.getTimeStr();
   startupTime = currentTime;
-  if (digitalRead(waterLevel) == 1) {
+  if (digitalRead(WATER_LEVEL) == 1) {
     waterLow = "true";
   } else {
     waterLow = "false";
@@ -176,6 +181,15 @@ void setup(void)
     timeClient.forceUpdate();
     Serial.println(timeClient.getFormattedTime());
 
+    if (usEastern.utcIsDST(timeClient.getEpochTime())) {
+      Serial.println("It is DST");
+      dst = true;
+      timeClient.setTimeOffset(-14400);
+    } else {
+      dst = false;
+      timeClient.setTimeOffset(-18000);
+    }
+
     // Set the RTC
     setTime();
   }
@@ -191,18 +205,18 @@ void setup(void)
 void loop() {
 
   // Check for a leak every loop
-  leakValue = analogRead(leakPin);
+  leakValue = analogRead(LEAK_PIN);
   if (leakValue > 100) {
     leak = "true";
     Serial.println("Leak detected. Turning filter off.");
-    digitalWrite(outlet7, HIGH);
+    digitalWrite(OUTLET7, HIGH);
   } else {
     leak = "false";
   }
 
   if (loopCount == 30) {
     // Update sensors
-    last_power = amps * voltage;
+    last_power = amps * VOLTAGE;
     sensors.requestTemperatures();
     internalTemperature = sensors.getTempCByIndex(0);
     waterTemperature = sensors.getTempCByIndex(1);
@@ -217,7 +231,7 @@ void loop() {
       kWh = 0;
     }
     new_time = rtc.getUnixTime(rtc.getTime());
-    kWh = kWh + ((((amps * voltage) + last_power) / 2) * (new_time - start_time_unix) / 3600000);
+    kWh = kWh + ((((amps * VOLTAGE) + last_power) / 2) * (new_time - start_time_unix) / 3600000);
     start_time_unix = new_time;
 
     // Output sensors to serial
@@ -234,7 +248,7 @@ void loop() {
     Serial.print("kWh used: ");
     Serial.println(kWh);
 
-    if (digitalRead(waterLevel) == 1) {
+    if (digitalRead(WATER_LEVEL) == 1) {
       waterLow = "true";
     } else {
       waterLow = "false";
@@ -246,8 +260,23 @@ void loop() {
     currentHour = rtc.getTime().hour;
     currentMinute = rtc.getTime().min;
 
+    if (usEastern.locIsDST(timeClient.getEpochTime())) {
+      Serial.println("It is DST");
+      timeClient.setTimeOffset(-14400);
+      if (dst == false) {
+        dst = true;
+        setTime();
+      }
+    } else {
+      timeClient.setTimeOffset(-18000);
+      if (dst == true) {
+        dst = false;
+        setTime();
+      }
+    }
+
     // If it is after 10pm and before 9am EST
-    if ((currentHour >= 3 && currentHour < 14)) {
+    if ((currentHour >= 22 || currentHour < 9)) {
       if (!nightTime) {
         night("");
       }
@@ -274,36 +303,36 @@ void loop() {
 void setupPins() {
 
   // Setup output pins
-  for (int pin = 0; pin < outputPinCount; pin++) {
-    pinMode(outletPins[pin], OUTPUT);
+  for (int pin = 0; pin < OUTPUT_PIN_COUNT; pin++) {
+    pinMode(OUTLET_PINS[pin], OUTPUT);
     delay(500);
   }
   // Setup input pins
-  for (int pin = 0; pin < inputPinCount; pin++) {
-    pinMode(inputPins[pin], INPUT);
+  for (int pin = 0; pin < INPUT_PIN_COUNT; pin++) {
+    pinMode(INPUT_PINS[pin], INPUT);
     delay(500);
   }
 
   // Turn off all of the optional pins
-  digitalWrite(outlet1, HIGH);
+  digitalWrite(OUTLET1, HIGH);
   delay(200);
-  digitalWrite(outlet2, HIGH);
+  digitalWrite(OUTLET2, HIGH);
   delay(200);
-  digitalWrite(outlet3, HIGH);
+  digitalWrite(OUTLET3, HIGH);
   delay(200);
   //  THE BELOW ARE ALWAYS ON
   //  Heat bulb
-  //  digitalWrite(outlet4, HIGH);
+  //  digitalWrite(OUTLET4, HIGH);
   //  Water heaters
-  //  digitalWrite(outlet5, HIGH);
-  //  digitalWrite(outlet6, HIGH);
+  //  digitalWrite(OUTLET5, HIGH);
+  //  digitalWrite(OUTLET6, HIGH);
   //  Filter
   // Don't turn on the filter if there is a leak at startup
   if (leak == "true") {
     Serial.println("Leak detected. Leaving filter off.");
-    digitalWrite(outlet7, HIGH);
+    digitalWrite(OUTLET7, HIGH);
   }
-  digitalWrite(outlet8, HIGH);
+  digitalWrite(OUTLET8, HIGH);
 
 }
 
@@ -312,11 +341,11 @@ int morning(String command) {
   dayTime = true;
   nightTime = false;
   Serial.println("Running day command.");
-  digitalWrite(outlet1, LOW);
+  digitalWrite(OUTLET1, LOW);
   delay(500);
-  digitalWrite(outlet2, LOW);
+  digitalWrite(OUTLET2, LOW);
   delay(500);
-  digitalWrite(outlet3, HIGH);
+  digitalWrite(OUTLET3, HIGH);
   return 1;
 }
 
@@ -325,16 +354,18 @@ int night(String command) {
   nightTime = true;
   dayTime = false;
   Serial.println("Running night command.");
-  digitalWrite(outlet3, LOW);
+  digitalWrite(OUTLET3, LOW);
   delay(500);
-  digitalWrite(outlet1, HIGH);
+  digitalWrite(OUTLET1, HIGH);
   delay(500);
-  digitalWrite(outlet2, HIGH);
+  digitalWrite(OUTLET2, HIGH);
   return 1;
 }
 
 int setTime() {
   timeClient.update();
+  delay(500);
+  timeClient.forceUpdate();
 
   Serial.println(timeClient.getFormattedDate());
   int day = timeClient.getDay();
