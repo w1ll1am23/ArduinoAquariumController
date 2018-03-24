@@ -146,7 +146,7 @@ void setup(void)
   waterTemperature = sensors.getTempCByIndex(1);
   baskingTemperature = sensors.getTempCByIndex(2);
   currentTime = rtc.getTimeStr();
-  startupTime = currentTime;
+  startupTime = start_time_unix;
   if (digitalRead(WATER_LEVEL) == 1) {
     waterLow = "true";
   } else {
@@ -223,10 +223,13 @@ void loop() {
     baskingTemperature = sensors.getTempCByIndex(2);
 
     amps = emon1.calcIrms(1480);
+    if (amps < 0.2) {
+      amps = 0.0;
+    }
 
     // Calculate the Kilowatt hours used in the last 24 hours
     // Reset the kWh value to 0 at Midnight ET
-    if (currentHour == 5 && currentMinute == 0) {
+    if (currentHour == 0 && currentMinute == 0) {
       yesterdays_total_kWh = kWh;
       kWh = 0;
     }
@@ -306,6 +309,7 @@ void setupPins() {
   for (int pin = 0; pin < OUTPUT_PIN_COUNT; pin++) {
     pinMode(OUTLET_PINS[pin], OUTPUT);
     delay(500);
+    digitalWrite(OUTLET_PINS[pin], LOW);
   }
   // Setup input pins
   for (int pin = 0; pin < INPUT_PIN_COUNT; pin++) {

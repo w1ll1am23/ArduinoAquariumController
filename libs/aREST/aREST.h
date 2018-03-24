@@ -1296,11 +1296,23 @@ bool send_command(bool headers) {
        // Send feedback to client
        if (LIGHTWEIGHT){addToBuffer(*string_variables[value]);}
        else {
-        addToBuffer(F("{\""));
-        addToBuffer(string_variables_names[value]);
-        addToBuffer(F("\": \""));
-        addToBuffer(*string_variables[value]);
-        addToBuffer(F("\", "));
+          if (*string_variables[value] == "true") {
+            addToBuffer(F("{\""));
+            addToBuffer(string_variables_names[value]);
+            addToBuffer(F("\": true"));
+            addToBuffer(F(", "));
+          } else if (*string_variables[value] == "false") {
+            addToBuffer(F("{\""));
+            addToBuffer(string_variables_names[value]);
+            addToBuffer(F("\": false"));
+            addToBuffer(F(", "));
+          } else {
+            addToBuffer(F("{\""));
+            addToBuffer(string_variables_names[value]);
+            addToBuffer(F("\": \""));
+            addToBuffer(*string_variables[value]);
+            addToBuffer(F("\", "));
+          }
        }
   }
   #endif
@@ -1403,11 +1415,23 @@ virtual void root_answer() {
       if (string_variables_index > 0){
 
         for (uint8_t i = 0; i < string_variables_index; i++){
-          addToBuffer(F("\""));
-          addToBuffer(string_variables_names[i]);
-          addToBuffer(F("\": \""));
-          addToBuffer(*string_variables[i]);
-          addToBuffer(F("\", "));
+          if (*string_variables[i] == "true") {
+            addToBuffer(F("\""));
+            addToBuffer(string_variables_names[i]);
+            addToBuffer(F("\": "));
+            addToBuffer(F("true, "));
+          } else if (*string_variables[i] == "false") {
+            addToBuffer(F("\""));
+            addToBuffer(string_variables_names[i]);
+            addToBuffer(F("\": "));
+            addToBuffer(F("false, "));
+          } else {
+            addToBuffer(F("\""));
+            addToBuffer(string_variables_names[i]);
+            addToBuffer(F("\": \""));
+            addToBuffer(*string_variables[i]);
+            addToBuffer(F("\", "));
+          }
         }
 
       }
