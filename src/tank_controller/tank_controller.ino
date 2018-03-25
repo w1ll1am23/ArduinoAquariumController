@@ -74,7 +74,7 @@ const int OUTLET6 = 7;
 const int OUTLET7 = 8;
 const int OUTLET8 = 9;
 const int LEAK_PIN = A0;
-const int OUTLET_PINS[] = {OUTLET1, OUTLET2, OUTLET3, OUTLET4, OUTLET5, OUTLET5, OUTLET7, OUTLET8};
+const int OUTLET_PINS[] = {OUTLET1, OUTLET2, OUTLET3, OUTLET4, OUTLET5, OUTLET6, OUTLET7, OUTLET8};
 const int OUTPUT_PIN_COUNT = 8;
 const int WATER_LEVEL = 13;
 const int INPUT_PINS[] = {WATER_LEVEL};
@@ -208,8 +208,10 @@ void loop() {
   leakValue = analogRead(LEAK_PIN);
   if (leakValue > 100) {
     leak = "true";
-    Serial.println("Leak detected. Turning filter off.");
-    digitalWrite(OUTLET7, HIGH);
+    if (digitalRead(OUTLET7) == LOW) {
+      Serial.println("Leak detected. Turning filter off.");
+      digitalWrite(OUTLET7, HIGH);
+    }
   } else {
     leak = "false";
   }
@@ -222,8 +224,8 @@ void loop() {
     waterTemperature = sensors.getTempCByIndex(1);
     baskingTemperature = sensors.getTempCByIndex(2);
 
-    amps = emon1.calcIrms(1480);
-    if (amps < 0.2) {
+    amps = emon1.calcIrms(1480) - 0.10;
+    if (amps < 0.3) {
       amps = 0.0;
     }
 
@@ -235,6 +237,9 @@ void loop() {
     }
     new_time = rtc.getUnixTime(rtc.getTime());
     kWh = kWh + ((((amps * VOLTAGE) + last_power) / 2) * (new_time - start_time_unix) / 3600000);
+    if (kWh < 0) {
+      kWh = 0;
+    }
     start_time_unix = new_time;
 
     // Output sensors to serial
@@ -309,7 +314,6 @@ void setupPins() {
   for (int pin = 0; pin < OUTPUT_PIN_COUNT; pin++) {
     pinMode(OUTLET_PINS[pin], OUTPUT);
     delay(500);
-    digitalWrite(OUTLET_PINS[pin], LOW);
   }
   // Setup input pins
   for (int pin = 0; pin < INPUT_PIN_COUNT; pin++) {

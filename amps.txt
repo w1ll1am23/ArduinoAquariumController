@@ -1,0 +1,13 @@
+Filter: ~0.61
+Day lights: ~0.50
+Night light: ~0.57
+Heater: ~1.5
+Heat bulb: ~.74
+
+Day total:
+min: 1.85
+max: 4.85
+
+Night total:
+min: 1.92
+max: 4.92
