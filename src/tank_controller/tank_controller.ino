@@ -25,7 +25,7 @@ EthernetUDP ntpUDP;
 byte mac[] = { 0x90, 0xA2, 0xDA, 0x0E, 0xFE, 0x12 };
 
 // IP address in case DHCP fails
-IPAddress ip(192, 168, 5, 221);
+IPAddress ip(192, 168, 5, 60);
 
 // Gateway adress
 IPAddress gateway(192, 168, 5, 1);
@@ -57,12 +57,16 @@ String startupTime;
 String currentTime;
 String waterLow;
 String leak;
+String errorMessage;
 int leakValue;
 float amps;
 float kWh;
 float yesterdays_total_kWh;
 
 int loopCount = 0;
+float waterTemperatureTemp;
+float baskingTemperatureTemp;
+float internalTemperatureTemp;
 
 // Constants for input/output pins
 const int OUTLET1 = 2;
@@ -142,9 +146,7 @@ void setup(void)
   // Init variables and expose them to REST API
   kWh = 0.0;
   yesterdays_total_kWh = 0.0;
-  internalTemperature = sensors.getTempCByIndex(0);
-  waterTemperature = sensors.getTempCByIndex(1);
-  baskingTemperature = sensors.getTempCByIndex(2);
+  setTemperatures();
   currentTime = rtc.getTimeStr();
   startupTime = start_time_unix;
   if (digitalRead(WATER_LEVEL) == 1) {
@@ -161,6 +163,7 @@ void setup(void)
   rest.variable("leaking", &leak);
   rest.variable("amps", &amps);
   rest.variable("kWh", &kWh);
+  rest.variable("error_message", &errorMessage);
 
   // Functions to be exposed probably won't need these.
   rest.function("morning", morning);
@@ -219,11 +222,7 @@ void loop() {
   if (loopCount == 30) {
     // Update sensors
     last_power = amps * VOLTAGE;
-    sensors.requestTemperatures();
-    internalTemperature = sensors.getTempCByIndex(0);
-    waterTemperature = sensors.getTempCByIndex(1);
-    baskingTemperature = sensors.getTempCByIndex(2);
-
+    setTemperatures();
     amps = emon1.calcIrms(1480) - 0.10;
     if (amps < 0.3) {
       amps = 0.0;
@@ -306,6 +305,30 @@ void loop() {
   rest.handle(client);
 
   wdt_reset();
+}
+
+void setTemperatures() {
+  sensors.requestTemperatures();
+  internalTemperatureTemp = sensors.getTempCByIndex(0);
+  waterTemperatureTemp = sensors.getTempCByIndex(1);
+  baskingTemperatureTemp = sensors.getTempCByIndex(2);
+  // If the temperatures are way off for some reason
+  // don't set the REST variables. Set the error message.
+  if (internalTemperatureTemp > 0 && internalTemperatureTemp < 100) {
+    internalTemperature = internalTemperatureTemp;
+  } else {
+    errorMessage = "Internal temperature read error";
+  }
+  if (waterTemperatureTemp > 0 && waterTemperatureTemp < 100) {
+    waterTemperature = waterTemperatureTemp;
+  } else {
+    errorMessage = "Water temperature read error";
+  }
+  if (baskingTemperatureTemp > 0 && baskingTemperatureTemp < 100) {
+    baskingTemperature = baskingTemperatureTemp;
+  } else {
+    errorMessage = "Basking temperature read error";
+  }
 }
 
 void setupPins() {
