@@ -1,18 +1,17 @@
+#include <ArduinoJson.h>
 #include <Timezone.h>
 #include <TimeLib.h>
 #include "EmonLib.h"
 #include <SPI.h>
 #include <Ethernet.h>
-#include <aREST.h>
 #include <avr/wdt.h>
 #include <NTPClient.h>
 #include <EthernetUdp.h>
 #include <DS3231.h>
 #include <DallasTemperature.h>
+#include <PubSubClient.h>
 
-#define ETH_CS    10
-#define SD_CS  4
-#define ONE_WIRE_BUS 12
+#include "config.h"
 
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature sensors(&oneWire);
@@ -30,26 +29,58 @@ IPAddress ip(192, 168, 5, 60);
 // Gateway adress
 IPAddress gateway(192, 168, 5, 1);
 
-// Ethernet server
-EthernetServer server(80);
-
 NTPClient timeClient(ntpUDP, "192.168.5.1", 0, 60000);
-
-// Create aREST instance
-aREST rest = aREST();
 
 // Init the DS3231 using the hardware interface
 DS3231  rtc(SDA, SCL);
 
+// Setup timezones
 TimeChangeRule usEDT = {"EDT", Second, Sun, Mar, 2, -240};  //UTC - 4 hours
 TimeChangeRule usEST = {"EST", First, Sun, Nov, 2, -300};   //UTC - 5 hours
 Timezone usEastern(usEDT, usEST);
+
+const char* mqtt_broker = MQTT_BROKER;
+const char* mqtt_clientId = MQTT_CLIENTID;
+const char* mqtt_username = MQTT_USERNAME;
+const char* mqtt_password = MQTT_PASSWORD;
+
+// MQTT topic setup
+String availabilityBase = MQTT_CLIENTID;
+String availabilitySuffix = "/availability";
+String availabilityTopicStr = availabilityBase + availabilitySuffix;
+const char* availabilityTopic = availabilityTopicStr.c_str();
+const char* birthMessage = "online";
+const char* lwtMessage = "offline";
+const char* outlet1_command_topic = MQTT_OUTLET1_COMMAND_TOPIC;
+const char* outlet2_command_topic = MQTT_OUTLET2_COMMAND_TOPIC;
+const char* outlet3_command_topic = MQTT_OUTLET3_COMMAND_TOPIC;
+const char* outlet4_command_topic = MQTT_OUTLET4_COMMAND_TOPIC;
+const char* outlet5_command_topic = MQTT_OUTLET5_COMMAND_TOPIC;
+const char* outlet6_command_topic = MQTT_OUTLET6_COMMAND_TOPIC;
+const char* outlet7_command_topic = MQTT_OUTLET7_COMMAND_TOPIC;
+const char* outlet8_command_topic = MQTT_OUTLET8_COMMAND_TOPIC;
+const char* all_outlet_command_topics[] = {outlet1_command_topic, outlet2_command_topic, outlet3_command_topic, outlet4_command_topic, outlet5_command_topic, outlet6_command_topic, outlet7_command_topic, outlet8_command_topic};
+const char* outlet1_state_topic = MQTT_OUTLET1_STATE_TOPIC;
+const char* outlet2_state_topic = MQTT_OUTLET2_STATE_TOPIC;
+const char* outlet3_state_topic = MQTT_OUTLET3_STATE_TOPIC;
+const char* outlet4_state_topic = MQTT_OUTLET4_STATE_TOPIC;
+const char* outlet5_state_topic = MQTT_OUTLET5_STATE_TOPIC;
+const char* outlet6_state_topic = MQTT_OUTLET6_STATE_TOPIC;
+const char* outlet7_state_topic = MQTT_OUTLET7_STATE_TOPIC;
+const char* outlet8_state_topic = MQTT_OUTLET8_STATE_TOPIC;
+const char* all_outlet_state_topics[] = {outlet1_state_topic, outlet2_state_topic, outlet3_state_topic, outlet4_state_topic, outlet5_state_topic, outlet6_state_topic, outlet7_state_topic, outlet8_state_topic};
+const char* sensors_topic = MQTT_SENSORS_TOPIC;
+
+EthernetClient ethClient;
+PubSubClient client(ethClient);
+
+
+const int OUTLET_PINS[] = {OUTLET1, OUTLET2, OUTLET3, OUTLET4, OUTLET5, OUTLET6, OUTLET7, OUTLET8};
 
 // Used for detecting time and runnning time based commands.
 int currentHour;
 int currentMinute;
 
-// Variables to be exposed to the API
 float waterTemperature;
 float baskingTemperature;
 float internalTemperature;
@@ -67,24 +98,6 @@ int loopCount = 0;
 float waterTemperatureTemp;
 float baskingTemperatureTemp;
 float internalTemperatureTemp;
-
-// Constants for input/output pins
-const int OUTLET1 = 2;
-const int OUTLET2 = 3;
-const int OUTLET3 = 11;
-const int OUTLET4 = 5;
-const int OUTLET5 = 6;
-const int OUTLET6 = 7;
-const int OUTLET7 = 8;
-const int OUTLET8 = 9;
-const int LEAK_PIN = A0;
-const int OUTLET_PINS[] = {OUTLET1, OUTLET2, OUTLET3, OUTLET4, OUTLET5, OUTLET6, OUTLET7, OUTLET8};
-const int OUTPUT_PIN_COUNT = 8;
-const int WATER_LEVEL = 13;
-const int INPUT_PINS[] = {WATER_LEVEL};
-const int INPUT_PIN_COUNT = 1;
-
-const float VOLTAGE = 117;
 
 bool nightTime = false;
 bool dayTime = false;
@@ -111,9 +124,9 @@ void setup(void)
   // Check for a leak
   leakValue = analogRead(LEAK_PIN);
   if (leakValue > 100) {
-    leak = "true";
+    leak = "LEAKING";
   } else {
-    leak = "false";
+    leak = "NOT LEAKING";
   }
 
   // Set the pins to input/output mode
@@ -133,45 +146,27 @@ void setup(void)
   currentMinute = rtc.getTime().min;
 
   // If it is after 10pm and before 9am EST
-  if ((currentHour >= 22 || currentHour < 9)) {
+  if ((currentHour >= NIGHT_START_HOUR || currentHour < DAY_START_HOUR)) {
     if (!nightTime) {
-      night("");
+      night();
     }
   } else {
     if (!dayTime) {
-      morning("");
+      morning();
     }
   }
 
-  // Init variables and expose them to REST API
+  // Init variables
   kWh = 0.0;
   yesterdays_total_kWh = 0.0;
   setTemperatures();
   currentTime = rtc.getTimeStr();
   startupTime = start_time_unix;
   if (digitalRead(WATER_LEVEL) == 1) {
-    waterLow = "true";
+    waterLow = "LOW";
   } else {
-    waterLow = "false";
+    waterLow = "NOT LOW";
   }
-  rest.variable("water_temperature", &waterTemperature);
-  rest.variable("basking_temperature", &baskingTemperature);
-  rest.variable("internal_temperature", &internalTemperature);
-  rest.variable("current_time", &currentTime);
-  rest.variable("startup_time", &startupTime);
-  rest.variable("water_low", &waterLow);
-  rest.variable("leaking", &leak);
-  rest.variable("amps", &amps);
-  rest.variable("kWh", &kWh);
-  rest.variable("error_message", &errorMessage);
-
-  // Functions to be exposed probably won't need these.
-  rest.function("morning", morning);
-  rest.function("night", night);
-
-  // Give name & ID to the device (ID should be 6 characters long)
-  rest.set_id("000001");
-  rest.set_name("tank");
 
   // Start the Ethernet connection and the server
   if (Ethernet.begin(mac) == 0) {
@@ -187,36 +182,169 @@ void setup(void)
     if (usEastern.utcIsDST(timeClient.getEpochTime())) {
       Serial.println("It is DST");
       dst = true;
-      timeClient.setTimeOffset(-14400);
+      timeClient.setTimeOffset(SAVINGS_OFFSET);
     } else {
       dst = false;
-      timeClient.setTimeOffset(-18000);
+      timeClient.setTimeOffset(STANDARD_OFFSET);
     }
 
     // Set the RTC
     setTime();
   }
 
-  server.begin();
   Serial.print("server is at ");
   Serial.println(Ethernet.localIP());
 
   // Start watchdog
-  wdt_enable(WDTO_4S);
+  client.setServer(mqtt_broker, 1883);
+  client.setCallback(callback);
 }
 
+void reconnect() {
+  Serial.print("Attempting MQTT connection...");
+  // Attempt to connect
+  if (client.connect(mqtt_clientId, mqtt_username, mqtt_password, availabilityTopic, 0, true, lwtMessage)) {
+    Serial.println("Connected!");
+
+    // Publish the birth message on connect/reconnect
+    publish_birth_message();
+
+    // Subscribe to the action topics to listen for action messages
+    for (int pin = 0; pin < OUTPUT_PIN_COUNT; pin++) {
+      Serial.print("Subscribing to: ");
+      Serial.println(all_outlet_command_topics[pin]);
+      client.subscribe(all_outlet_command_topics[pin]);
+      delay(100);
+    }
+
+    publish_all_statuses();
+
+  }
+  else {
+    Serial.print("failed, rc=");
+    Serial.print(client.state());
+    delay(5000);
+  }
+}
+
+void publish_all_statuses() {
+  for (int pin = 0; pin < OUTPUT_PIN_COUNT; pin++) {
+    if (digitalRead(OUTLET_PINS[pin]) == LOW) {
+      client.publish(all_outlet_state_topics[pin], "ON", true);
+    } else {
+      client.publish(all_outlet_state_topics[pin], "OFF", true);
+    }
+  }
+  publishSensors();
+}
+
+void publishSensors() {
+  StaticJsonBuffer<512> JSONbuffer;
+  JsonObject& JSONencoder = JSONbuffer.createObject();
+
+  JSONencoder["water_level"] = waterLow;
+  JSONencoder["filter_leak"] = leak;
+  JSONencoder["water_temp"] = (String)waterTemperature;
+  JSONencoder["internal_temp"] = (String)internalTemperature;
+  JSONencoder["basking_temp"] = (String)baskingTemperature;
+  JSONencoder["amps"] = (String)amps;
+  JSONencoder["kwh"] = (String)kWh;
+
+  char JSONmessageBuffer[512];
+  JSONencoder.printTo(JSONmessageBuffer, sizeof(JSONmessageBuffer));
+  Serial.println("Sending message to MQTT topic..");
+  Serial.println(JSONmessageBuffer);
+
+  if (client.publish(sensors_topic, JSONmessageBuffer) == true) {
+    Serial.println("Success sending message");
+  } else {
+    Serial.println("Error sending message");
+  }
+
+  client.loop();
+}
+
+void publish_birth_message() {
+  // Publish the birthMessage
+  Serial.print("Publishing birth message \"");
+  Serial.print(birthMessage);
+  Serial.print("\" to ");
+  Serial.print(availabilityTopic);
+  Serial.println("...");
+  client.publish(availabilityTopic, birthMessage, true);
+}
+
+void callback(char* topic, byte* payload, unsigned int length) {
+  Serial.print("Message arrived [");
+  Serial.print(topic);
+  Serial.print("] ");
+
+  for (int i = 0; i < length; i++) {
+    Serial.print((char)payload[i]);
+  }
+
+  Serial.println();
+
+  String topicToProcess = topic;
+  payload[length] = '\0';
+  String payloadToProcess = (char*)payload;
+  triggerAction(topicToProcess, payloadToProcess);
+}
+
+void triggerAction(String requestedTopic, String requestedAction) {
+  Serial.println("MQTT request received.");
+  Serial.print("Topic: ");
+  Serial.println(requestedTopic);
+  Serial.print("Action: ");
+  Serial.println(requestedAction);
+  for (int pin = 0; pin < OUTPUT_PIN_COUNT; pin++) {
+    if (strcmp(all_outlet_command_topics[pin], requestedTopic.c_str()) == 0) {
+      if (requestedAction == "ON") {
+        Serial.println("Turning on");
+        digitalWrite(OUTLET_PINS[pin], LOW);
+        client.publish(all_outlet_state_topics[pin], "ON", true);
+      } else if (requestedAction == "OFF") {
+        Serial.println("Turning off");
+        digitalWrite(OUTLET_PINS[pin], HIGH);
+        client.publish(all_outlet_state_topics[pin], "OFF", true);
+      } else {
+        Serial.println("Invalid action requested.");
+      }
+    }
+  }
+
+}
+
+
 void loop() {
+
+  if (!client.connected()) {
+    reconnect();
+  }
 
   // Check for a leak every loop
   leakValue = analogRead(LEAK_PIN);
   if (leakValue > 100) {
-    leak = "true";
+    leak = "LEAKING";
     if (digitalRead(OUTLET7) == LOW) {
       Serial.println("Leak detected. Turning filter off.");
       digitalWrite(OUTLET7, HIGH);
+      publish_all_statuses();
     }
   } else {
-    leak = "false";
+    leak = "NOT LEAKING";
+  }
+
+  // If for some reason the heaters or heater bulds are off
+  // turn them on
+  if (digitalRead(OUTLET4) == HIGH) {
+    digitalWrite(OUTLET4, LOW);
+  }
+  if (digitalRead(OUTLET5) == HIGH) {
+    digitalWrite(OUTLET5, LOW);
+  }
+  if (digitalRead(OUTLET6) == HIGH) {
+    digitalWrite(OUTLET6, LOW);
   }
 
   if (loopCount == 30) {
@@ -256,9 +384,9 @@ void loop() {
     Serial.println(kWh);
 
     if (digitalRead(WATER_LEVEL) == 1) {
-      waterLow = "true";
+      waterLow = "LOW";
     } else {
-      waterLow = "false";
+      waterLow = "NOT LOW";
     }
 
     currentTime = rtc.getTimeStr();
@@ -269,13 +397,13 @@ void loop() {
 
     if (usEastern.locIsDST(timeClient.getEpochTime())) {
       Serial.println("It is DST");
-      timeClient.setTimeOffset(-14400);
+      timeClient.setTimeOffset(SAVINGS_OFFSET);
       if (dst == false) {
         dst = true;
         setTime();
       }
     } else {
-      timeClient.setTimeOffset(-18000);
+      timeClient.setTimeOffset(STANDARD_OFFSET);
       if (dst == true) {
         dst = false;
         setTime();
@@ -283,35 +411,33 @@ void loop() {
     }
 
     // If it is after 10pm and before 9am EST
-    if ((currentHour >= 22 || currentHour < 9)) {
-      if (!nightTime) {
-        night("");
+    if ((currentHour >= NIGHT_START_HOUR || currentHour < DAY_START_HOUR)) {
+      if (!nightTime || digitalRead(OUTLET3) == HIGH) {
+        night();
       }
     } else {
-      if (!dayTime) {
-        morning("");
+      if (!dayTime || digitalRead(OUTLET1) == HIGH) {
+        morning();
       }
     }
 
     // reset loop counter
     loopCount = 0;
+    publish_all_statuses();
+    client.loop();
   } else {
     delay(1000);
     loopCount = loopCount + 1;
+    client.loop();
   }
 
-  // listen for incoming clients
-  EthernetClient client = server.available();
-  rest.handle(client);
-
-  wdt_reset();
 }
 
 void setTemperatures() {
   sensors.requestTemperatures();
-  internalTemperatureTemp = sensors.getTempCByIndex(0);
-  waterTemperatureTemp = sensors.getTempCByIndex(1);
-  baskingTemperatureTemp = sensors.getTempCByIndex(2);
+  internalTemperatureTemp = sensors.getTempCByIndex(INTERNAL_TEMP_SENSOR_LOCATION);
+  waterTemperatureTemp = sensors.getTempCByIndex(WATER_TEMP_SENSOR_LOCATION);
+  baskingTemperatureTemp = sensors.getTempCByIndex(BASKING_TEMP_SENSOR_LOCATION);
   // If the temperatures are way off for some reason
   // don't set the REST variables. Set the error message.
   if (internalTemperatureTemp > 0 && internalTemperatureTemp < 100) {
@@ -340,7 +466,7 @@ void setupPins() {
   }
   // Setup input pins
   for (int pin = 0; pin < INPUT_PIN_COUNT; pin++) {
-    pinMode(INPUT_PINS[pin], INPUT);
+    pinMode(WATER_LEVEL, INPUT);
     delay(500);
   }
 
@@ -368,7 +494,7 @@ void setupPins() {
 }
 
 // Funtion to call in the morning
-int morning(String command) {
+int morning() {
   dayTime = true;
   nightTime = false;
   Serial.println("Running day command.");
@@ -381,7 +507,7 @@ int morning(String command) {
 }
 
 // Function to call at night
-int night(String command) {
+int night() {
   nightTime = true;
   dayTime = false;
   Serial.println("Running night command.");
