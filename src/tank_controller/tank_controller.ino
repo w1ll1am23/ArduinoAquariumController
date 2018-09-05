@@ -335,18 +335,6 @@ void loop() {
     leak = "NOT LEAKING";
   }
 
-  // If for some reason the heaters or heater bulds are off
-  // turn them on
-  if (digitalRead(OUTLET4) == HIGH) {
-    digitalWrite(OUTLET4, LOW);
-  }
-  if (digitalRead(OUTLET5) == HIGH) {
-    digitalWrite(OUTLET5, LOW);
-  }
-  if (digitalRead(OUTLET6) == HIGH) {
-    digitalWrite(OUTLET6, LOW);
-  }
-
   if (loopCount == 30) {
     // Update sensors
     last_power = amps * VOLTAGE;
@@ -477,19 +465,23 @@ void setupPins() {
   delay(200);
   digitalWrite(OUTLET3, HIGH);
   delay(200);
+  
   //  THE BELOW ARE ALWAYS ON
   //  Heat bulb
   //  digitalWrite(OUTLET4, HIGH);
   //  Water heaters
   //  digitalWrite(OUTLET5, HIGH);
+  //  Bubbler
   //  digitalWrite(OUTLET6, HIGH);
+  //  WiFi router
+  //  digitalWrite(OUTLET8, HIGH);
+  
   //  Filter
   // Don't turn on the filter if there is a leak at startup
-  if (leak == "true") {
+  if (leak == "LEAKING") {
     Serial.println("Leak detected. Leaving filter off.");
     digitalWrite(OUTLET7, HIGH);
   }
-  digitalWrite(OUTLET8, HIGH);
 
 }
 
