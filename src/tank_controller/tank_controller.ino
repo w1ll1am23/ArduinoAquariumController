@@ -322,20 +322,19 @@ void loop() {
     reconnect();
   }
 
-  // Check for a leak every loop
-  leakValue = analogRead(LEAK_PIN);
-  if (leakValue > 100) {
-    leak = "LEAKING";
-    if (digitalRead(OUTLET7) == LOW) {
-      Serial.println("Leak detected. Turning filter off.");
-      digitalWrite(OUTLET7, HIGH);
-      publish_all_statuses();
-    }
-  } else {
-    leak = "NOT LEAKING";
-  }
-
   if (loopCount == 30) {
+    leakValue = analogRead(LEAK_PIN);
+    if (leakValue > 150) {
+      leak = "LEAKING";
+      if (digitalRead(OUTLET7) == LOW) {
+        Serial.println("Leak detected. Turning filter off.");
+        digitalWrite(OUTLET7, HIGH);
+        publish_all_statuses();
+      }
+    } else {
+      leak = "NOT LEAKING";
+    }
+    
     // Update sensors
     last_power = amps * VOLTAGE;
     setTemperatures();
@@ -352,7 +351,8 @@ void loop() {
     }
     new_time = rtc.getUnixTime(rtc.getTime());
     kWh = kWh + ((((amps * VOLTAGE) + last_power) / 2) * (new_time - start_time_unix) / 3600000);
-    if (kWh < 0) {
+    // This should fix any strange values that come in at startup
+    if (kWh < 0 || kWh > 20) {
       kWh = 0;
     }
     start_time_unix = new_time;
@@ -465,7 +465,7 @@ void setupPins() {
   delay(200);
   digitalWrite(OUTLET3, HIGH);
   delay(200);
-  
+
   //  THE BELOW ARE ALWAYS ON
   //  Heat bulb
   //  digitalWrite(OUTLET4, HIGH);
@@ -475,7 +475,7 @@ void setupPins() {
   //  digitalWrite(OUTLET6, HIGH);
   //  WiFi router
   //  digitalWrite(OUTLET8, HIGH);
-  
+
   //  Filter
   // Don't turn on the filter if there is a leak at startup
   if (leak == "LEAKING") {
