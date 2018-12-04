@@ -12,6 +12,7 @@
 #define MQTT_OUTLET6_COMMAND_TOPIC "turtleTank/outlet/6/action"
 #define MQTT_OUTLET7_COMMAND_TOPIC "turtleTank/outlet/7/action"
 #define MQTT_OUTLET8_COMMAND_TOPIC "turtleTank/outlet/8/action"
+#define MQTT_FEEDER_COMMAND_TOPIC "turtleTank/feeder/action"
 #define MQTT_OUTLET1_STATE_TOPIC "turtleTank/outlet/1/state"
 #define MQTT_OUTLET2_STATE_TOPIC "turtleTank/outlet/2/state"
 #define MQTT_OUTLET3_STATE_TOPIC "turtleTank/outlet/3/state"
@@ -27,19 +28,19 @@
 #define ETH_CS    10
 #define SD_CS  4
 #define ONE_WIRE_BUS 12
-#define OUTLET1 2
-#define OUTLET2 3
-#define OUTLET3 11
-#define OUTLET4 5
-#define OUTLET5 6
-#define OUTLET6 7
-#define OUTLET7 8
-#define OUTLET8 9
+#define OUTLET1 2           // Turtle day lighting (UVB and basking) - 2 plugs
+#define OUTLET2 3           // Plant lighting and under dock - 2 plugs
+#define OUTLET3 11          // All night lighting
+#define OUTLET4 5           // heat lamp
+#define OUTLET5 6           // water heaters - 2 plugs
+#define OUTLET6 7           // bubbler
+#define OUTLET7 8           // filter
+#define OUTLET8 9           // WiFi router
 #define LEAK_PIN A0
-#define OUTPUT_PIN_COUNT 8
 #define WATER_LEVEL 13
 #define OUTPUT_PIN_COUNT 8
 #define INPUT_PIN_COUNT 1
+#define FEEDER 46
 
 // Time settings (Eastern US)
 

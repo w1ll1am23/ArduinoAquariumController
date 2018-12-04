@@ -10,6 +10,7 @@
 #include <DS3231.h>
 #include <DallasTemperature.h>
 #include <PubSubClient.h>
+#include <Servo.h>
 
 #include "config.h"
 
@@ -38,6 +39,8 @@ DS3231  rtc(SDA, SCL);
 TimeChangeRule usEDT = {"EDT", Second, Sun, Mar, 2, -240};  //UTC - 4 hours
 TimeChangeRule usEST = {"EST", First, Sun, Nov, 2, -300};   //UTC - 5 hours
 Timezone usEastern(usEDT, usEST);
+
+Servo feeder;
 
 const char* mqtt_broker = MQTT_BROKER;
 const char* mqtt_clientId = MQTT_CLIENTID;
@@ -106,6 +109,9 @@ bool dst = false;
 long start_time_unix;
 long new_time;
 double last_power;
+
+bool feeding = false;
+int feed_time = 15;
 
 void setup(void)
 {
@@ -216,6 +222,9 @@ void reconnect() {
       client.subscribe(all_outlet_command_topics[pin]);
       delay(100);
     }
+    Serial.print("Subscribing to: ");
+    Serial.println(MQTT_FEEDER_COMMAND_TOPIC);
+    client.subscribe(MQTT_FEEDER_COMMAND_TOPIC);
 
     publish_all_statuses();
 
@@ -297,6 +306,9 @@ void triggerAction(String requestedTopic, String requestedAction) {
   Serial.println(requestedTopic);
   Serial.print("Action: ");
   Serial.println(requestedAction);
+  if (strcmp(MQTT_FEEDER_COMMAND_TOPIC, requestedTopic.c_str()) == 0) {
+    run_feeder(requestedAction);
+  }
   for (int pin = 0; pin < OUTPUT_PIN_COUNT; pin++) {
     if (strcmp(all_outlet_command_topics[pin], requestedTopic.c_str()) == 0) {
       if (requestedAction == "ON") {
@@ -320,6 +332,19 @@ void loop() {
 
   if (!client.connected()) {
     reconnect();
+  }
+
+  if (feeding && feed_time > 0) {
+    Serial.print("Feed time left: ");
+    Serial.println(feed_time);
+    feeder.write(0);
+    delay(1000);
+    feeder.write(180);
+    delay(1500);
+    feed_time = feed_time - 1;
+  } else if (feed_time == 0) {
+    feed_time = 15;
+    run_feeder("STOP");
   }
 
   if (loopCount == 30) {
@@ -509,6 +534,21 @@ int night() {
   delay(500);
   digitalWrite(OUTLET2, HIGH);
   return 1;
+}
+
+void run_feeder(String command) {
+  if (command == "STOP") {
+    feeder.detach();
+    feeding = false;
+  } else {
+    Serial.println("Feeding");
+    feeder.attach(FEEDER);
+    if (command != "") {
+      feed_time = command.toInt();
+    }
+    feeder.attach(FEEDER);
+    feeding = true;
+  }
 }
 
 int setTime() {
